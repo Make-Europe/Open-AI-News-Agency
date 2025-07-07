@@ -2,7 +2,6 @@ from __future__ import print_function
 import os.path
 import base64
 from email import message_from_bytes
-
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -13,7 +12,8 @@ from vertexai.preview.generative_models import GenerativeModel
 # --- SETUP VARIABLES ---
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 PROJECT_ID = "ai-news-agency"
-REGION = "us-central1"  # Ensure this region supports gemini-2.5-pro
+REGION = "us-central1"
+LAST_ID_FILE = "last_email_id.txt"
 
 # --- GMAIL: Get the latest email message ---
 def get_latest_email():
@@ -33,32 +33,34 @@ def get_latest_email():
 
     service = build('gmail', 'v1', credentials=creds)
     results = service.users().messages().list(userId='me', maxResults=1).execute()
+
     if 'messages' not in results:
         print("📭 No messages found.")
-        return None
+        return None, None
 
     message_id = results['messages'][0]['id']
+
+    # Check if we've already processed this one
+    if os.path.exists(LAST_ID_FILE):
+        with open(LAST_ID_FILE, 'r') as f:
+            last_id = f.read().strip()
+            if last_id == message_id:
+                print("🔁 No new email to process.")
+                return None, None
+
+    # Save new ID
+    with open(LAST_ID_FILE, 'w') as f:
+        f.write(message_id)
+
     msg = service.users().messages().get(userId='me', id=message_id, format='raw').execute()
     msg_str = base64.urlsafe_b64decode(msg['raw'].encode('ASCII'))
     mime_msg = message_from_bytes(msg_str)
-
-    # Extract text from multipart emails
-    if mime_msg.is_multipart():
-        for part in mime_msg.walk():
-            content_type = part.get_content_type()
-            content_disposition = str(part.get("Content-Disposition"))
-
-            if content_type == "text/plain" and "attachment" not in content_disposition:
-                return part.get_payload(decode=True).decode(errors="ignore")
-    else:
-        return mime_msg.get_payload(decode=True).decode(errors="ignore")
-
-    return None
+    return mime_msg.get_payload(), message_id
 
 # --- VERTEX AI: Summarize the email using Gemini ---
 def summarize_email(email_text):
     vertexai.init(project=PROJECT_ID, location=REGION)
-    model = GenerativeModel("gemini-2.5-pro")  # ✅ latest stable model
+    model = GenerativeModel("gemini-2.5-pro")
     prompt = f"""
 You are a professional news editor. Summarize the following email as a short, objective news paragraph:
 
@@ -70,11 +72,13 @@ You are a professional news editor. Summarize the following email as a short, ob
 # --- MAIN ---
 if __name__ == '__main__':
     print("🚀 Starting AI News Agent...")
-    email_body = get_latest_email()
+    email_body, email_id = get_latest_email()
     if email_body:
-        print("✉️ Email received. Summarizing...")
+        print("✉️ New email received. Summarizing...")
         summary = summarize_email(email_body)
         print("\n📰 --- AI-Generated News Summary ---\n")
         print(summary)
+        with open("summaries.log", "a") as f:
+            f.write(f"{email_id}\n{summary}\n\n")
     else:
-        print("❌ No email found or error retrieving.")
+        print("⏸ No new summary generated.")
