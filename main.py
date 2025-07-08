@@ -2,12 +2,16 @@ from __future__ import print_function
 import os.path
 import base64
 from email import message_from_bytes
+
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 import vertexai
 from vertexai.preview.generative_models import GenerativeModel
+
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- SETUP VARIABLES ---
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -33,20 +37,18 @@ def get_latest_email():
 
     service = build('gmail', 'v1', credentials=creds)
     results = service.users().messages().list(userId='me', maxResults=1).execute()
-
     if 'messages' not in results:
         print("📭 No messages found.")
-        return None, None
+        return None
 
     message_id = results['messages'][0]['id']
 
-    # Check if we've already processed this one
     if os.path.exists(LAST_ID_FILE):
         with open(LAST_ID_FILE, 'r') as f:
             last_id = f.read().strip()
-            if last_id == message_id:
-                print("🔁 No new email to process.")
-                return None, None
+        if message_id == last_id:
+            print("🔁 No new email to process.")
+            return None
 
     # Save new ID
     with open(LAST_ID_FILE, 'w') as f:
@@ -55,7 +57,22 @@ def get_latest_email():
     msg = service.users().messages().get(userId='me', id=message_id, format='raw').execute()
     msg_str = base64.urlsafe_b64decode(msg['raw'].encode('ASCII'))
     mime_msg = message_from_bytes(msg_str)
-    return mime_msg.get_payload(), message_id
+
+    def extract_email_body(mime_msg):
+        if mime_msg.is_multipart():
+            for part in mime_msg.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get("Content-Disposition"))
+                if content_type == "text/plain" and "attachment" not in content_disposition:
+                    return part.get_payload(decode=True).decode()
+                elif content_type == "text/html" and "attachment" not in content_disposition:
+                    return part.get_payload(decode=True).decode()
+        else:
+            return mime_msg.get_payload(decode=True).decode()
+        return None
+
+    email_text = extract_email_body(mime_msg)
+    return email_text, message_id
 
 # --- VERTEX AI: Summarize the email using Gemini ---
 def summarize_email(email_text):
@@ -70,15 +87,38 @@ You are a professional news editor. Summarize the following email as a short, ob
     return response.text
 
 # --- MAIN ---
+from wordpress_publisher import publish_to_wordpress
+
 if __name__ == '__main__':
     print("🚀 Starting AI News Agent...")
-    email_body, email_id = get_latest_email()
-    if email_body:
+    email_body_and_id = get_latest_email()
+
+    if email_body_and_id:
+        email_body, email_id = email_body_and_id
         print("✉️ New email received. Summarizing...")
         summary = summarize_email(email_body)
+
         print("\n📰 --- AI-Generated News Summary ---\n")
         print(summary)
+
+        # Save to log
         with open("summaries.log", "a") as f:
             f.write(f"{email_id}\n{summary}\n\n")
+
+        # Try publishing to WordPress
+        try:
+            title = summary.split(".")[0][:60] + "…"  # Auto headline
+            publish_to_wordpress(title, summary)
+        except Exception as e:
+            print("❌ Failed to publish to WordPress:", e)
+
     else:
+        print("🔁 No new email to process.")
         print("⏸ No new summary generated.")
+
+# Publish the summary
+title = summary.split(".")[0][:60] + "…"  # Auto-generate a short headline
+try:
+    publish_to_wordpress(title, summary)
+except Exception as e:
+    print("❌ Failed to publish to WordPress:", e)
