@@ -98,5 +98,25 @@ if __name__ == '__main__':
         print(summary)
         with open("summaries.log", "a") as f:
             f.write(f"{email_id}\n{summary}\n\n")
-    else:
-        print("⏸ No new summary generated.")
+
+        # --- WORDPRESS PUBLISHING ---
+        from wordpress_publisher import publish_to_wordpress
+        import json
+
+        # Load image and crosslink data
+        with open("images/dax30.json") as img_file:
+            images = json.load(img_file)
+
+        with open("links/business.json") as link_file:
+            crosslinks = json.load(link_file)
+
+        # Publish the summary
+        title_line = summary.split("\n")[0].strip("* ").strip()
+        publish_to_wordpress(
+            title=title_line,
+            content=summary,
+            category="5",  # Fixed category ID for Business
+            tags=[8],      # Use the correct numeric tag ID
+            images=images,
+        crosslinks=crosslinks
+    )
