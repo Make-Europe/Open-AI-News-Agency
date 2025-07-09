@@ -18,6 +18,7 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 PROJECT_ID = os.getenv("PROJECT_ID", "ai-news-agency")
 REGION = os.getenv("REGION", "us-central1")
 LAST_ID_FILE = "last_email_id.txt"
+AGENT_PROMPT_FILE = "agents/lisa_luckas.txt"
 
 # --- GMAIL: Get the latest email message ---
 def get_latest_email():
@@ -78,12 +79,12 @@ def get_latest_email():
 def summarize_email(email_text):
     vertexai.init(project=PROJECT_ID, location=REGION)
     model = GenerativeModel("gemini-2.5-pro")
-    prompt = f"""
-You are a professional news editor. Summarize the following email as a short, objective news paragraph:
 
-{email_text}
-"""
-    response = model.generate_content(prompt)
+    with open(AGENT_PROMPT_FILE, "r") as f:
+        role_prompt = f.read()
+
+    full_prompt = f"{role_prompt}\n\n{email_text}"
+    response = model.generate_content(full_prompt)
     return response.text
 
 # --- MAIN ---
