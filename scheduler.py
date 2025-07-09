@@ -1,5 +1,5 @@
 from apscheduler.schedulers.blocking import BlockingScheduler
-from main import get_latest_email, summarize_email
+from oldMain import get_latest_email, summarize_email
 from datetime import datetime
 
 def run_summary():
