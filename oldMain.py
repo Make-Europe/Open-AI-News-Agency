@@ -1,22 +1,18 @@
 from __future__ import print_function
-import os
+import os.path
 import base64
 from email import message_from_bytes
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from dotenv import load_dotenv
 
 import vertexai
 from vertexai.preview.generative_models import GenerativeModel
 
-# --- Load environment variables ---
-load_dotenv()
-
 # --- SETUP VARIABLES ---
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-PROJECT_ID = os.getenv("PROJECT_ID", "ai-news-agency")
-REGION = os.getenv("REGION", "us-central1")
+PROJECT_ID = "ai-news-agency"
+REGION = "us-central1"
 LAST_ID_FILE = "last_email_id.txt"
 
 # --- GMAIL: Get the latest email message ---
@@ -39,16 +35,17 @@ def get_latest_email():
     results = service.users().messages().list(userId='me', maxResults=1).execute()
     if 'messages' not in results:
         print("📭 No messages found.")
-        return None, None
+        return None
 
     message_id = results['messages'][0]['id']
+    LAST_ID_FILE = "last_id.txt"
 
     if os.path.exists(LAST_ID_FILE):
         with open(LAST_ID_FILE, 'r') as f:
             last_id = f.read().strip()
         if message_id == last_id:
             print("🔁 No new email to process.")
-            return None, None
+            return None
 
     # Save new ID
     with open(LAST_ID_FILE, 'w') as f:
@@ -58,11 +55,13 @@ def get_latest_email():
     msg_str = base64.urlsafe_b64decode(msg['raw'].encode('ASCII'))
     mime_msg = message_from_bytes(msg_str)
 
+    # Extract plain or HTML content
     def extract_email_body(mime_msg):
         if mime_msg.is_multipart():
             for part in mime_msg.walk():
                 content_type = part.get_content_type()
                 content_disposition = str(part.get("Content-Disposition"))
+
                 if content_type == "text/plain" and "attachment" not in content_disposition:
                     return part.get_payload(decode=True).decode()
                 elif content_type == "text/html" and "attachment" not in content_disposition:
